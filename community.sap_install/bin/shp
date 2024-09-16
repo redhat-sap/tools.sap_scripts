@@ -98,7 +98,6 @@ info
 # 
 
 ##  Check if an ansible inventory is given on the command line
-config_file_only=0
 extra_args=""
 
 while getopts ':hi:p:v:nkKu:' OPTION; do
@@ -187,7 +186,7 @@ if [ -n "${inventory}" ]; then
         sap_default_domain=""
         ap_parameter="-i ${inventory}"
    else
-      if regexp_test "^([a-zA-Z0-9_\-]+,\.)+$" "${inventory}"; then
+      if regexp_test "^([a-zA-Z0-9_\-\.]+,)+$" "${inventory}"; then
 	      inv_default=${inventory}
         sap_default_domain=""
         ap_parameter="-i ${inventory}"
