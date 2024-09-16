@@ -98,6 +98,8 @@ info
 # 
 
 ##  Check if an ansible inventory is given on the command line
+config_file_only=0
+extra_args=""
 
 while getopts ':hi:p:v:nkKu:' OPTION; do
   case "${OPTION}" in
@@ -137,16 +139,19 @@ while getopts ':hi:p:v:nkKu:' OPTION; do
 
     k) 
       # Addtional eligible ansible parameter: connection password
-      extra_args += " -k"
+      extra_args+=" -k"
       ;;
 
     K) 
       # Addtional eligible ansible parameter: BECOME Password
-      extra_args += " -K"
+      extra_args+=" -K"
       ;;
 
-    u) # Addtional eligible ansible parameter: -u
-      extra_args += " -u ${OPTARG}"
+    u) 
+      # Addtional eligible ansible parameter: -u
+      extra_args+=" -u ${OPTARG}"
+      ;;
+
     ?) 
       # Catch all rule
       usage
@@ -182,7 +187,7 @@ if [ -n "${inventory}" ]; then
         sap_default_domain=""
         ap_parameter="-i ${inventory}"
    else
-      if regexp_test "^([a-zA-Z0-9_\-]+,)+$" "${inventory}"; then
+      if regexp_test "^([a-zA-Z0-9_\-]+,\.)+$" "${inventory}"; then
 	      inv_default=${inventory}
         sap_default_domain=""
         ap_parameter="-i ${inventory}"
@@ -208,7 +213,7 @@ else
 fi
 rm -f $params && touch $params
 
-echo sap_hana_group: $(ask "Enter comma separated list of systems that you want to check or prepare for SAP HANA (end with comma):" "${inv_default}" "^([a-zA-Z0-9_\-]+,)+$") >> $params
+echo sap_hana_group: $(ask "Enter comma separated list of systems that you want to check or prepare for SAP HANA (end with comma):" "${inv_default}" "^([a-zA-Z0-9_\-\.]+,)+$") >> $params
 echo sap_domain: $(ask "Enter DNS Domain for your sap systems:" "${sap_default_domain}" ) >> $params
 [[ '[yY]' =~ $(ask "Do you want to check the current setup only (assert mode)? (y/n)" "n" "^[yYnN]$" ) ]] && assert=true || assert=false
 if [ "${assert}" == "false" ]; then
@@ -237,15 +242,15 @@ if [ ${config_file_only} ]; then
   echo ""
   echo "Your ansible variables file is here: $params"
   echo "You can now prepare or check your System for HANA Installation like this:"
-  echo "ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
+  echo "ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
   echo ""
 else
   echo "running the playbook"
-  echo "ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
+  echo "ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
   if [ "${assert}" == "false" ]; then
-     ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}
+     ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}
   else # assert = true
-    ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params} |\
+    ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params} |\
     awk '{sub ("    \"msg\": ", "")}
       /TASK/{task_line=$0}
       /fatal:/{fatal_line=$0; nfatal[host]++}
@@ -267,4 +272,3 @@ else
   fi
   echo "You can store the config file ${params} for future use"
 fi
-
