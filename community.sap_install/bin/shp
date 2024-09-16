@@ -1,0 +1,270 @@
+#!/bin/bash 
+
+# Call this script interactively to prepare your system(s) for a SAP HANA installation
+
+info() {
+cat << EOT
+*****************************************************************************
+* sap_hana_preconfigure                                                     *
+*                                                                           *
+* This script is used to prepare an SAP HANA system.                        *
+* The minimum viable parameters to successfully prepare your system for an  *
+* SAP HANA installation will be asked interactively.                        *
+* Useful defaults will be set, so that it is save to just press enter       *
+*                                                                           *
+*****************************************************************************
+
+EOT
+}
+
+usage() {
+cat << EOT
+Call $(basename $0) [-h] [-i inventory] [-p parameterfile] [-v path_to_python_venv] [-n] [-u user] [-k] [-K] [font_light_gray|font_no_color] [reset]
+Optional Parameters 
+
+-h : help 
+-i : ansible inventory to use
+-p : name of parameter file
+-v : path to python virtual environment that contains ansible installation
+-n : don't run the playbook, only create a config file
+-u : connection user
+-k : connection password
+-K : BECOME password
+font_light_grey|font_no_color: Set readable font color
+reset: reset font color
+
+EOT
+}
+
+# usage: regexp_test <regexp> <compare1> [<compare2>]
+function regexp_test() {
+   declare __line;
+
+    for __line in "${@:2}"; 
+    do
+        if ! [[ "$__line" =~ $1 ]];
+        then
+            return 1;
+        fi
+    done
+
+    return 0; 
+}
+
+# usage: ask <prompt> <default> <regexp> <private>
+function ask() {
+   prompt=$1
+   default=$2
+   rex=${3:-'^.*$'}
+   [ -n "${4}" ] && private='-s' 
+
+   answer=""
+   answer_is_valid=false
+   until [ "${answer_is_valid}" == "true" ]; do
+      read -r ${private} -p "${prompt} [${default}] " answer
+      if [ -z "${answer}" ]; then
+        answer_is_valid=true
+	     echo ${default}
+      else
+        if regexp_test "${rex}" "${answer}"; then
+         answer_is_valid=true
+         echo ${answer}
+        else
+         echo "ERROR: Invalid entry" >&2
+        fi
+      fi
+   done
+}
+
+# usage exiterror "errormessage" [errorcode]
+function exiterror() {
+   echo "ERROR: $1" >&2
+   exit ${2:-1}
+}
+
+#############################################################
+
+info
+
+
+#
+#    - sap_systems: "{{ (groups['all'] == []) | ternary ('localhost', 'all') }}"
+#      # sap_systems: "{{ (groups['all'] == []) | ternary ('localhost', groups['all'] | join(',')) }}"
+
+# 
+# TODO: 
+# Check Ansible Environment and setup Ansible Virtual Python or Activate or install/ configure ansible-navigator
+# Value ansible inventory if passed to the CLI with -i and fill default value
+# 
+
+##  Check if an ansible inventory is given on the command line
+
+while getopts ':hi:p:v:nkKu:' OPTION; do
+  case "${OPTION}" in
+    h) 
+      # help message
+      usage
+      exit 0
+      ;;
+
+    i)
+      # Ansible Inventory
+      inventory=${OPTARG}
+      ;;
+
+    p)
+      # Existing Parameter File
+      params=${OPTARG}
+      ;;
+
+    v) 
+      # Path to python venv
+      venv=$OPTARG
+      if [ -f ${venv}/bin/activate ]; then
+        . ${venv}/bin/activate
+      else
+         echo "Creating Ansible Installation in Python Virtual Environment"
+	      python3 -m venv ${venv}
+         . ${venv}/bin/activate
+         pip install ansible
+      fi
+      ;;
+
+    n) 
+      # Do not run, just create config file
+      config_file_only=1;
+      ;;
+
+    k) 
+      # Addtional eligible ansible parameter: connection password
+      extra_args += " -k"
+      ;;
+
+    K) 
+      # Addtional eligible ansible parameter: BECOME Password
+      extra_args += " -K"
+      ;;
+
+    u) # Addtional eligible ansible parameter: -u
+      extra_args += " -u ${OPTARG}"
+    ?) 
+      # Catch all rule
+      usage
+      exit 1
+      ;;
+
+  esac
+done
+
+# if other parameters are added in the future
+shift "$(($OPTIND -1))"
+
+# default font color: Light Cyan, which should be readable on both bright and dark background
+__FONT_COLOR=36m
+
+if [[ ${1}. == "font_light_gray". ]]; then
+   __FONT_COLOR=37m
+elif [[ ${1}. == "font_no_color". ]]; then
+   __FONT_COLOR=30m
+fi
+
+if [[ ${2}. == "reset." ]]; then
+   awk 'BEGIN{printf ("\033['${__FONT_COLOR}'Resetting font color\n")}'
+   exit
+fi
+
+## Check if inventory file or implicit inventory declaration is used
+if [ -n "${inventory}" ]; then
+  if [ -f ${inventory} ]; then 
+	# inventory file exists
+        # TODO: Inventory Syntax Parsing
+        inv_default=all
+        sap_default_domain=""
+        ap_parameter="-i ${inventory}"
+   else
+      if regexp_test "^([a-zA-Z0-9_\-]+,)+$" "${inventory}"; then
+	      inv_default=${inventory}
+        sap_default_domain=""
+        ap_parameter="-i ${inventory}"
+      else
+        exiterror "Invalid inventory syntax. Parameter has to be file or a comma separated list of hosts that ends with a comma" 
+      fi
+   fi
+else
+   inv_default=localhost
+   sap_default_domain="$(ansible localhost -m setup -a "filter=ansible_domain" 2> /dev/null | grep ansible_domain | cut -d: -f2 | tr -d " \"" )"
+   ap_parameter=""
+fi
+
+## Parameterfile
+if [ -z "${params}" ]; then
+  params=$(mktemp /tmp/params.yml.XXXXXX) || exiterror "Could not create Parameterfile"
+else
+  if [ -f "${params}" ]; then
+    if [[ '^[nN]$' =~ $(ask "$params exists. Do you want to overwrite?" "y" "^[yYnN]$" ) ]]; then
+      exiterror "Paramterfile exist. Exit to protect from overwrite" 0
+    fi
+  fi
+fi
+rm -f $params && touch $params
+
+echo sap_hana_group: $(ask "Enter comma separated list of systems that you want to check or prepare for SAP HANA (end with comma):" "${inv_default}" "^([a-zA-Z0-9_\-]+,)+$") >> $params
+echo sap_domain: $(ask "Enter DNS Domain for your sap systems:" "${sap_default_domain}" ) >> $params
+[[ '[yY]' =~ $(ask "Do you want to check the current setup only (assert mode)? (y/n)" "n" "^[yYnN]$" ) ]] && assert=true || assert=false
+if [ "${assert}" == "false" ]; then
+  [[ 'nN' =~  $(ask "Do you want to update your /etc/host" "y" "^[yYnN]$" ) ]] && modify_hosts=true || modify_hosts=false
+  [[ '[yY]' =~ $(ask "Do you want to update the system? (y/n)" "n" "^[yYnN]$") ]] && update=true || update=false
+  [[ '[yY]' =~ $(ask "Do you want to reboot the system if required? (y/n)" "n" "^[yYnN]$") ]] && reboot_ok=true || reboot_ok=false
+  if [[ "${reboot_ok}" == "true" ]]; then
+    reboot_fail=false
+  else
+    [[ '[nN]' =~ $(ask "Do you want to stop with an error if the system needs a reboot? (y/n)" "y" "^[yYnN]$") ]] && reboot_fail=false || reboot_fail=true
+  fi
+  echo sap_general_preconfigure_modify_etc_hosts: ${modify_hosts} >> $params
+  echo sap_general_preconfigure_update: ${update} >> $params
+  echo sap_general_preconfigure_fail_if_reboot_required: ${reboot_fail}>> $params
+  echo sap_hana_preconfigure_update: ${update}>> $params
+  echo sap_hana_preconfigure_fail_if_reboot_required: ${reboot_fail} >> $params
+  echo sap_hana_preconfigure_reboot_ok: ${reboot_ok} >> $params
+else
+  echo sap_general_preconfigure_assert: ${assert} >> $params
+  echo sap_general_preconfigure_assert_ignore_errors: true >> $params
+  echo sap_hana_preconfigure_assert: ${assert} >> $params
+  echo sap_hana_preconfigure_assert_ignore_errors: true >> $params
+fi
+
+if [ ${config_file_only} ]; then 
+  echo ""
+  echo "Your ansible variables file is here: $params"
+  echo "You can now prepare or check your System for HANA Installation like this:"
+  echo "ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
+  echo ""
+else
+  echo "running the playbook"
+  echo "ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
+  if [ "${assert}" == "false" ]; then
+     ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}
+  else # assert = true
+    ansible-playbook ${ap_parameter} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params} |\
+    awk '{sub ("    \"msg\": ", "")}
+      /TASK/{task_line=$0}
+      /fatal:/{fatal_line=$0; nfatal[host]++}
+      /...ignoring/{nfatal[host]--; if (nfatal[host]<0) nfatal[host]=0}
+      /^[a-z]/&&/: \[/{gsub ("\\[", ""); gsub ("]", ""); gsub (":", ""); host=$2}
+      /SAP note/{print "\033['${__FONT_COLOR}'[" host"] "$0}
+      /FAIL:/{nfail[host]++; print "\033[31m[" host"] "$0}
+      /WARN:/{nwarn[host]++; print "\033[33m[" host"] "$0}
+      /PASS:/{npass[host]++; print "\033[32m[" host"] "$0}
+      /INFO:/{print "\033[34m[" host"] "$0}
+      /changed/&&/unreachable/{print "\033['${__FONT_COLOR}'[" host"] "$0}
+      END{print ("---"); for (var in npass) {printf ("[%s] ", var); if (nfatal[var]>0) {
+            printf ("\033[31mFATAL ERROR!!! Playbook might have been aborted!!!\033['${__FONT_COLOR}' Last TASK and fatal output:\n"); print task_line, fatal_line
+            exit 199
+        }
+        else printf ("\033[31mFAIL: %d  \033[33mWARN: %d  \033[32mPASS: %d\033['${__FONT_COLOR}'\n", nfail[var], nwarn[var], npass[var])}
+        if (nfail[var] != 0) exit (nfail[var])
+      }'
+  fi
+  echo "You can store the config file ${params} for future use"
+fi
+
