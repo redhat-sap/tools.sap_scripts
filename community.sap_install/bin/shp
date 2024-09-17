@@ -2,6 +2,21 @@
 
 # Call this script interactively to prepare your system(s) for a SAP HANA installation
 
+# run a cleanup, if program ends unexpected
+trap cleanup INT
+
+function cleanup() {
+  # reset font color
+  printf '\033[m'
+  
+  # remove temporary files
+  if [ -f $"{params}" ]; then
+    [[ '[yY]' =~ $(ask "Do you want to remove the configfile ${params}? (y/n)" "n" "^[yYnN]$") ]] && rm -f ${params} || echo "keeping config file"
+  fi
+  
+  exit 1
+}
+
 info() {
 cat << EOT
 *****************************************************************************
@@ -127,7 +142,7 @@ while getopts ':hi:p:v:nkKu:' OPTION; do
          echo "Creating Ansible Installation in Python Virtual Environment"
 	      python3 -m venv ${venv}
          . ${venv}/bin/activate
-         pip install ansible
+         pip install ansible==9.6.1 # defined version for environment
       fi
       ;;
 
@@ -164,7 +179,9 @@ done
 shift "$(($OPTIND -1))"
 
 # default font color: Light Cyan, which should be readable on both bright and dark background
-__FONT_COLOR=36m
+# Needed for assert only
+#__FONT_COLOR=36m
+__FONT_COLOR=m # regular color
 
 if [[ ${1}. == "font_light_gray". ]]; then
    __FONT_COLOR=37m
@@ -172,10 +189,11 @@ elif [[ ${1}. == "font_no_color". ]]; then
    __FONT_COLOR=30m
 fi
 
-if [[ ${2}. == "reset." ]]; then
-   awk 'BEGIN{printf ("\033['${__FONT_COLOR}'Resetting font color\n")}'
-   exit
-fi
+# Should not be necessary
+#if [[ ${2}. == "reset." ]]; then
+#   awk 'BEGIN{printf ("\033['${__FONT_COLOR}'Resetting font color\n")}'
+#   exit
+#fi
 
 ## Check if inventory file or implicit inventory declaration is used
 if [ -n "${inventory}" ]; then
@@ -269,5 +287,6 @@ else
         if (nfail[var] != 0) exit (nfail[var])
       }'
   fi
+  printf '\033[m' # restore color
   echo "You can store the config file ${params} for future use"
 fi
