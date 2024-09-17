@@ -34,7 +34,7 @@ EOT
 
 usage() {
 cat << EOT
-Call $(basename $0) [-h] [-i inventory] [-p parameterfile] [-v path_to_python_venv] [-n] [-u user] [-k] [-K] [font_light_gray|font_no_color] [reset]
+Call $(basename $0) [-h] [-i inventory] [-p parameterfile] [-v path_to_python_venv] [-n] [-u user] [-k] [-K] [-c font_light_gray|font_no_color]
 Optional Parameters 
 
 -h : help 
@@ -45,8 +45,7 @@ Optional Parameters
 -u : connection user
 -k : connection password
 -K : BECOME password
-font_light_grey|font_no_color: Set readable font color
-reset: reset font color
+-c : font_light_grey|font_no_color: Set standard font color for assert output
 
 EOT
 }
@@ -114,8 +113,12 @@ info
 
 ##  Check if an ansible inventory is given on the command line
 extra_args=""
+# default font color: Light Cyan, which should be readable on both bright and dark background
+# Needed for assert only
+#__FONT_COLOR=36m
+__FONT_COLOR=m # regular color
 
-while getopts ':hi:p:v:nkKu:' OPTION; do
+while getopts ':hi:p:v:nkKu:c:' OPTION; do
   case "${OPTION}" in
     h) 
       # help message
@@ -166,6 +169,15 @@ while getopts ':hi:p:v:nkKu:' OPTION; do
       extra_args+=" -u ${OPTARG}"
       ;;
 
+    c)
+      # Set default font color
+      if [[ "${OPTARG}" == "font_light_gray" ]]; then
+        __FONT_COLOR=37m
+      elif [[ "${OPTARG}" == "font_no_color" ]]; then
+        __FONT_COLOR=30m
+      fi
+      ;;
+     
     ?) 
       # Catch all rule
       usage
@@ -178,17 +190,8 @@ done
 # if other parameters are added in the future
 shift "$(($OPTIND -1))"
 
-# default font color: Light Cyan, which should be readable on both bright and dark background
-# Needed for assert only
-#__FONT_COLOR=36m
-__FONT_COLOR=m # regular color
-
-if [[ ${1}. == "font_light_gray". ]]; then
-   __FONT_COLOR=37m
-elif [[ ${1}. == "font_no_color". ]]; then
-   __FONT_COLOR=30m
-fi
-
+# Set default font color
+printf "\033[${__FONT_COLOR}"
 # Should not be necessary
 #if [[ ${2}. == "reset." ]]; then
 #   awk 'BEGIN{printf ("\033['${__FONT_COLOR}'Resetting font color\n")}'
@@ -265,9 +268,9 @@ else
   echo "running the playbook"
   echo "ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}"
   if [ "${assert}" == "false" ]; then
-     ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}
+     LANG=en_US.UTF-8 ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params}
   else # assert = true
-    ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params} |\
+    LANG=en_US.UTF-8 ansible-playbook ${ap_parameter} ${extra_args} community.sap_install.sap_hana_preconfigure_exec.yml -e @${params} |\
     awk '{sub ("    \"msg\": ", "")}
       /TASK/{task_line=$0}
       /fatal:/{fatal_line=$0; nfatal[host]++}
@@ -288,5 +291,6 @@ else
       }'
   fi
   printf '\033[m' # restore color
-  echo "You can store the config file ${params} for future use"
+  echo ""
+  echo "You can copy the config file ${params} for future use"
 fi
